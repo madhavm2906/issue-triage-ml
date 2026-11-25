@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from typing import Literal
 
 from pydantic import AwareDatetime, BaseModel, PositiveInt
+from sqlalchemy import case, or_
 from sqlalchemy.dialects.postgresql import insert
 
 from app.database import engine
@@ -38,15 +39,25 @@ def save_issues(repository: str, items: list[dict]) -> dict[str, int]:
     rows = [by_id[key] for key in sorted(by_id)]
     table = Issue.__table__
     statement = insert(table).values(rows)
+    incoming = statement.excluded
+    text_changed = or_(
+        table.c.title.is_distinct_from(incoming.title),
+        table.c.body.is_distinct_from(incoming.body),
+    )
+    updates = {
+        column.name: incoming[column.name]
+        for column in table.columns
+        if column.name not in {"github_id", "content_version"}
+    }
+    updates["content_version"] = case(
+        (text_changed, table.c.content_version + 1),
+        else_=table.c.content_version,
+    )
 
     statement = statement.on_conflict_do_update(
         index_elements=[table.c.github_id],
-        set_={
-            column.name: statement.excluded[column.name]
-            for column in table.columns
-            if column.name != "github_id"
-        },
-        where=statement.excluded.updated_at >= table.c.updated_at,
+        set_=updates,
+        where=incoming.updated_at >= table.c.updated_at,
     ).returning(table.c.github_id)
 
     with engine.begin() as connection:

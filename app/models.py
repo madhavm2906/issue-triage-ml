@@ -57,6 +57,7 @@ class Issue(Base):
         server_default=text("'[]'::jsonb"),
     )
     url: Mapped[str] = mapped_column(Text)
+    content_version: Mapped[int] = mapped_column(BigInteger, server_default=text("1"))
 
     # Creation and update times supplied by GitHub.
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -73,7 +74,7 @@ class TriageReview(Base):
     __tablename__ = "triage_reviews"
 
     __table_args__ = (
-        UniqueConstraint("issue_id", name="uq_triage_reviews_issue_id"),
+        UniqueConstraint("issue_id", "issue_version", name="uq_triage_reviews_issue_version"),
         CheckConstraint(
             "suggested_label IN ('bug', 'feature-request')",
             name="ck_triage_reviews_suggested_label",
@@ -94,6 +95,7 @@ class TriageReview(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     issue_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("issues.github_id"))
+    issue_version: Mapped[int] = mapped_column(BigInteger)
     title: Mapped[str] = mapped_column(Text)
     body: Mapped[str] = mapped_column(Text)
     suggested_label: Mapped[str] = mapped_column(String(16))

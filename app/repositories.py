@@ -1,7 +1,7 @@
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Path, Query
-from sqlalchemy import case, select
+from sqlalchemy import and_, case, select
 
 from app.database import engine
 from app.models import Issue, TriageReview
@@ -34,9 +34,13 @@ def saved_issues(
     limit: Limit = 25,
 ) -> dict:
     repository = f"{owner}/{repo}".lower()
+    current_review = and_(
+        reviews.c.issue_id == issues.c.github_id,
+        reviews.c.issue_version == issues.c.content_version,
+    )
     statement = (
         select(issues.c.github_id, issues.c.number, issues.c.title, issues.c.state, review_status)
-        .select_from(issues.outerjoin(reviews, reviews.c.issue_id == issues.c.github_id))
+        .select_from(issues.outerjoin(reviews, current_review))
         .where(issues.c.repository == repository)
         .order_by(issues.c.number.desc())
         .limit(limit + 1)
