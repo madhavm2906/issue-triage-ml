@@ -1,92 +1,88 @@
-# GitHub Issue Triage
+# Issue Triage ML
 
-A local tool for suggesting `bug` or `feature-request` on GitHub issues. FastAPI imports public issues into PostgreSQL. A scikit-learn model suggests a label, and the React dashboard lets a maintainer approve it or choose the other label. The review record keeps the text the model saw, its suggestion, and the final decision.
+I built this to help maintainers sort incoming GitHub issues. The model reads the title and description and suggests either a bug or a feature request. A reviewer can accept the suggestion or change it. The worker applies the saved decision to GitHub in the configured private sandbox.
 
-## Local setup
-
-The demo uses Python 3.12, Docker Compose, and Node 24. Run the commands from the repository root on Ubuntu or WSL.
-
-On a fresh checkout, create `.env` with these local settings. Use your existing `.env` if the database is already set up.
-
-```dotenv
-POSTGRES_DB=issue_triage
-POSTGRES_USER=issue_triage
-POSTGRES_PASSWORD=local-demo-password
-DATABASE_URL=postgresql+psycopg://issue_triage:local-demo-password@127.0.0.1:5433/issue_triage
-```
+## Run it locally
 
 ```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt -r requirements-ml.txt
-docker compose up -d
+bash scripts/triage.sh start
+```
+
+Open [the dashboard](http://127.0.0.1:8080/). Open your repository, click **Sync latest page**, then send an issue to review. After saving a decision, refresh **Repository Issues** to see the delivery status. The worker uses the GitHub labels `bug` and `enhancement`.
+
+Use `bash scripts/triage.sh status` to check the services, `bash scripts/triage.sh logs` to see recent activity, and `bash scripts/triage.sh stop` when you are done.
+
+## How it works
+
+The React dashboard calls a FastAPI server. PostgreSQL keeps the issues, review history, and delivery queue. Editing an issue title or description creates a new version for review. Saving a decision and queueing its label happen in one database transaction. The worker checks the issue text on GitHub before applying the label and retries temporary delivery failures.
+
+I trained a logistic regression classifier on TF IDF features from VS Code issues. I split the 393 labeled issues by creation date to evaluate on newer examples. At the default cutoff, adding the cleaned issue description improved validation macro F1 from 0.579 to 0.745. Tuning the cutoff on that same validation split raised it to 0.864. An evaluation on a separate batch of newer issues is still pending.
+
+## Run the workflow test
+
+```bash
+bash scripts/test_workflow.sh
+```
+
+The test starts a fresh PostgreSQL database and simulates GitHub. It checks that saving a decision twice produces one label write and that the worker stays within its configured repository.
+
+<details>
+<summary>First time setup</summary>
+
+Run these commands from the project folder with Docker Compose and Python 3.12 installed.
+
+```bash
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt -r requirements-ml.txt -r requirements-github.txt
+
+if [[ ! -e .env ]]; then
+    triage_db_password="$(python3.12 -c 'import secrets; print(secrets.token_hex(24))')"
+    (
+        umask 077
+        cat > .env <<ENV
+POSTGRES_DB=issue_triage
+POSTGRES_USER=issue_triage
+POSTGRES_PASSWORD=$triage_db_password
+DATABASE_URL=postgresql+psycopg://issue_triage:$triage_db_password@127.0.0.1:5433/issue_triage
+ENV
+    )
+fi
+
+docker compose up -d --wait db
 .venv/bin/python -m alembic upgrade head
 .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-Leave FastAPI running. Open a second terminal in the repository root.
-
-## Prepare the model
-
-If you already have both saved models and the original export, go to the dashboard step. For a new setup, run this in the second terminal.
+With the API running, open a second terminal in the project folder and collect labeled VS Code issues. The results can change as new issues are published.
 
 ```bash
-for page in 1 2; do
+(
+    set -e
     for label in bug feature-request; do
-        curl --fail-with-body -sS -w '\n' -X POST \
-            "http://127.0.0.1:8000/repositories/microsoft/vscode/import?state=all&page=$page&per_page=100&labels=$label" \
-            || break 2
+        for page in 1 2; do
+            curl -fsS -w '\n' -X POST \
+                "http://127.0.0.1:8000/repositories/microsoft/vscode/import?page=$page&per_page=100&labels=$label"
+        done
     done
-done
 
-.venv/bin/python export_dataset.py microsoft/vscode --output data/vscode_issues.jsonl
-.venv/bin/python train_baseline.py data/vscode_issues.jsonl \
-    --output-dir artifacts/issue_triage_baseline
-.venv/bin/python compare_body.py
-.venv/bin/python save_body_candidate.py
+    .venv/bin/python export_dataset.py microsoft/vscode --output data/vscode_issues.jsonl
+    .venv/bin/python train_baseline.py data/vscode_issues.jsonl --output-dir artifacts/issue_triage_baseline
+    .venv/bin/python compare_body.py
+    .venv/bin/python save_body_candidate.py
+)
 ```
 
-A new import pulls the latest issues, so it can produce different counts and scores. If a date split lacks one label, import earlier pages for both labels and export again before training. The recorded scores below came from the original 393 issue export.
+Create a private GitHub App with Issues read and write access and turn off webhooks. Install it on one private sandbox repository and make sure that repository has the `bug` and `enhancement` labels. See [GitHub App registration](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app) and [installation](https://docs.github.com/en/apps/using-github-apps/installing-your-own-github-app).
 
-## Try the review dashboard
+Save the generated private key in your home configuration directory. Create `~/.config/issue-triage/compose.env` with your own values and the full path to that key. If you use `XDG_CONFIG_HOME`, put the file under its `issue-triage` folder.
 
-From the repository root, print a few issue IDs and start the frontend.
-
-```bash
-.venv/bin/python - <<'PY'
-import json
-from pathlib import Path
-
-lines = Path("data/vscode_issues.jsonl").read_text(encoding="utf-8").splitlines()
-for line in lines[:5]:
-    issue = json.loads(line)
-    print(f'{issue["github_id"]} | #{issue["number"]} | {issue["title"]}')
-PY
-
-cd frontend
-npm ci
-npm run build && npm run dev
+```dotenv
+GITHUB_APP_ID=YOUR_APP_ID
+GITHUB_INSTALLATION_ID=YOUR_INSTALLATION_ID
+GITHUB_TRIAGE_REPOSITORY=YOUR_ACCOUNT/YOUR_SANDBOX
+GITHUB_APP_PRIVATE_KEY_PATH=/absolute/path/to/github-app.pem
 ```
 
-1. Open [http://localhost:5174](http://localhost:5174).
-2. Copy the first number from a printed line into **Imported GitHub issue ID**. Click **Add to queue**.
-3. Read the description and approve the suggestion or pick the other label.
-4. Reload and add the same ID again. **Already reviewed** confirms the decision persisted. Use another ID to try a second review.
+Stop Uvicorn with Ctrl+C and run `bash scripts/triage.sh start`.
 
-Review actions write to the local database. The same issue reuses its review record. A conflicting second decision returns HTTP 409.
-
-## Model results
-
-The original experiment used 275 training issues, 59 validation issues, and 59 test issues, split by creation time. Both models use TF-IDF and logistic regression.
-
-| Model | Bug cutoff | Validation macro F1 | Validation bugs caught | Validation feature requests correct |
-|---|---:|---:|---:|---:|
-| Title only | 0.40 | 0.786 | 30/35 | 17/24 |
-| Title and cleaned description | 0.45 | 0.864 | 27/35 | 24/24 |
-
-The dashboard uses the title and cleaned description candidate. The fresh evaluation is pending. With FastAPI running, rerun the evaluator from the repository root.
-
-```bash
-.venv/bin/python evaluate_fresh.py
-```
-
-It waits for at least 20 newer examples of each label, saves that sample, and compares both models on the same issues.
+</details>
