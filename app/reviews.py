@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, insert, select, update
 
 from app.database import engine
+from app.label_worker import enqueue_label_update
 from app.models import Issue, TriageReview
 from app.prediction import IssueText, predict_issue
 
@@ -43,12 +44,8 @@ def review_data(row) -> dict:
 @router.post("/reviews")
 def queue_issue(request: QueueRequest) -> dict:
     with engine.begin() as connection:
-        issue = connection.execute(
-            select(issues.c.title, issues.c.body, issues.c.content_version)
-            .where(issues.c.github_id == request.issue_id)
-            .with_for_update()
-        ).mappings().one_or_none()
-
+        issue_query = select(issues).where(issues.c.github_id == request.issue_id)
+        issue = connection.execute(issue_query.with_for_update()).mappings().one_or_none()
         if issue is None:
             raise HTTPException(404, "Import the issue before adding it to the review queue.")
 
@@ -114,11 +111,8 @@ def decide_review(review_id: ReviewID, decision: ReviewDecision) -> dict:
         if row is None:
             raise HTTPException(404, "Review not found.")
 
-        version = connection.execute(
-            select(issues.c.content_version)
-            .where(issues.c.github_id == row["issue_id"])
-            .with_for_update()
-        ).scalar_one()
+        issue_query = select(issues).where(issues.c.github_id == row["issue_id"])
+        issue = connection.execute(issue_query.with_for_update()).mappings().one()
 
         row = connection.execute(review_query).mappings().one()
         if row["final_label"] is not None:
@@ -126,14 +120,13 @@ def decide_review(review_id: ReviewID, decision: ReviewDecision) -> dict:
                 raise HTTPException(409, "This review already has a different decision.")
             return review_data(row)
 
-        if row["issue_version"] != version:
-            raise HTTPException(
-                409, "The issue changed. Refresh the queue and send it to review again."
-            )
+        if row["issue_version"] != issue["content_version"]:
+            raise HTTPException(409, "The issue changed. Send it to review again.")
 
         row = connection.execute(
             update(reviews).where(reviews.c.id == review_id)
             .values(final_label=decision.final_label, decided_at=func.now())
             .returning(*reviews.c)
         ).mappings().one()
+        enqueue_label_update(connection, row, issue)
     return review_data(row)
