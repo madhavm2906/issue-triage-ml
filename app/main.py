@@ -1,12 +1,14 @@
-from typing import Annotated, Literal
+from typing import Annotated
 
-from fastapi import FastAPI, HTTPException, Path, Query
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.concurrency import run_in_threadpool
 
 from app.github import list_repository_issues
 from app.prediction import router as prediction_router
+from app.repositories import Owner, Repo, State
+from app.repositories import router as repository_router
 from app.reviews import router as review_router
 from app.storage import save_issues
 
@@ -16,11 +18,9 @@ app = FastAPI(
     version="0.1.0",
 )
 app.include_router(prediction_router)
+app.include_router(repository_router)
 app.include_router(review_router)
 
-Owner = Annotated[str, Path(pattern=r"^[A-Za-z0-9_-]+$")]
-Repo = Annotated[str, Path(pattern=r"^[A-Za-z0-9_.-]+$")]
-State = Literal["open", "closed", "all"]
 Page = Annotated[int, Query(ge=1)]
 PageSize = Annotated[int, Query(ge=1, le=100)]
 Labels = Annotated[
@@ -66,13 +66,9 @@ async def import_issues(
             save_issues, repository, data["issues"]
         )
     except ValidationError as exc:
-        raise HTTPException(
-            502, "GitHub issue data failed validation."
-        ) from exc
+        raise HTTPException(502, "GitHub issue data failed validation.") from exc
     except SQLAlchemyError as exc:
-        raise HTTPException(
-            503, "Could not save issues to the database."
-        ) from exc
+        raise HTTPException(503, "Could not save issues to the database.") from exc
 
     return {
         "repository": repository,

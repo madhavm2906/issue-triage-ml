@@ -8,6 +8,7 @@ export default defineConfig({
     port: 5174,
     strictPort: true,
     proxy: {
+      '/repositories': 'http://127.0.0.1:8000',
       '/reviews': 'http://127.0.0.1:8000',
     },
   },
