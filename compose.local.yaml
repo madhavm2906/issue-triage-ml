@@ -1,0 +1,81 @@
+x-backend-build: &backend-build
+  context: .
+  dockerfile: deploy/Dockerfile
+  target: backend
+
+x-database-env: &database-env
+  DATABASE_URL: postgresql+psycopg://db:5432
+  PGDATABASE: "${POSTGRES_DB:?Set POSTGRES_DB in .env}"
+  PGUSER: "${POSTGRES_USER:?Set POSTGRES_USER in .env}"
+  PGPASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
+
+x-application: &application
+  build: *backend-build
+  user: "${TRIAGE_UID:?Export TRIAGE_UID}:${TRIAGE_GID:?Export TRIAGE_GID}"
+  restart: unless-stopped
+  environment:
+    <<: *database-env
+    GITHUB_APP_ID: "${GITHUB_APP_ID:?Export GITHUB_APP_ID}"
+    GITHUB_INSTALLATION_ID: "${GITHUB_INSTALLATION_ID:?Export GITHUB_INSTALLATION_ID}"
+    GITHUB_TRIAGE_REPOSITORY: "${GITHUB_TRIAGE_REPOSITORY:?Export GITHUB_TRIAGE_REPOSITORY}"
+    GITHUB_APP_PRIVATE_KEY_PATH: /run/triage/github-app.pem
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+
+x-github-key: &github-key
+  type: bind
+  source: "${GITHUB_APP_PRIVATE_KEY_PATH:?Export GITHUB_APP_PRIVATE_KEY_PATH}"
+  target: /run/triage/github-app.pem
+  read_only: true
+  bind:
+    create_host_path: false
+
+services:
+  migrate:
+    build: *backend-build
+    environment: *database-env
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    <<: *application
+    command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    volumes:
+      - *github-key
+      - type: bind
+        source: ./artifacts/issue_triage_body_candidate
+        target: /srv/triage/artifacts/issue_triage_body_candidate
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=2).close()"
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  worker:
+    <<: *application
+    command: ["python", "-m", "app.github_label_worker"]
+    volumes:
+      - *github-key
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+      target: dashboard
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      api:
+        condition: service_healthy
