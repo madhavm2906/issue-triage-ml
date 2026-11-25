@@ -41,7 +41,7 @@ def lease_values(state):
     return {"state": state, "lease_token": None, "lease_until": None}
 
 
-def claim(review_id=None):
+def claim(review_id=None, *, repository=None):
     ready = or_(
         and_(jobs.c.state == "queued", jobs.c.available_at <= func.now()),
         and_(jobs.c.state == "sending", jobs.c.lease_until <= func.now()),
@@ -49,6 +49,8 @@ def claim(review_id=None):
     statement = select(jobs).where(ready)
     if review_id is not None:
         statement = statement.where(jobs.c.review_id == review_id)
+    if repository is not None:
+        statement = statement.where(jobs.c.repository == repository)
     statement = statement.order_by(jobs.c.available_at, jobs.c.review_id)
     statement = statement.limit(1).with_for_update(skip_locked=True)
 
@@ -107,8 +109,8 @@ def is_current(job):
         return connection.execute(statement).scalar_one_or_none() is not None
 
 
-def run_once(send: Callable[[dict], None], *, review_id=None):
-    job = claim(review_id)
+def run_once(send: Callable[[dict], None], *, review_id=None, repository=None):
+    job = claim(review_id, repository=repository)
     if job is None:
         return None
     if not is_current(job):
@@ -123,5 +125,4 @@ def run_once(send: Callable[[dict], None], *, review_id=None):
         return finish(job, "failed", error=str(exc))
     except PermanentLabelError as exc:
         return finish(job, "failed", error=str(exc))
-
     return finish(job, "applied")
