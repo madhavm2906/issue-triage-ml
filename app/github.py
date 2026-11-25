@@ -4,6 +4,20 @@ import httpx
 from fastapi import HTTPException
 
 
+def normalize_issue(item: dict) -> dict:
+    return {
+        "github_id": item["id"],
+        "number": item["number"],
+        "title": item["title"],
+        "body": item.get("body") or "",
+        "state": item["state"],
+        "labels": [label["name"] for label in item.get("labels", [])],
+        "created_at": item["created_at"],
+        "updated_at": item["updated_at"],
+        "url": item["html_url"],
+    }
+
+
 async def list_repository_issues(
     owner: str,
     repo: str,
@@ -58,17 +72,7 @@ async def list_repository_issues(
         raise HTTPException(502, "GitHub returned an unexpected response.")
 
     issues = [
-        {
-            "github_id": item["id"],
-            "number": item["number"],
-            "title": item["title"],
-            "body": item.get("body") or "",
-            "state": item["state"],
-            "labels": [label["name"] for label in item.get("labels", [])],
-            "created_at": item["created_at"],
-            "updated_at": item["updated_at"],
-            "url": item["html_url"],
-        }
+        normalize_issue(item)
         for item in response.json()
         if "pull_request" not in item
     ]
