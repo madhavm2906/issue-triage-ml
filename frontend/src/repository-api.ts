@@ -1,9 +1,14 @@
+export type DeliveryState = 'queued' | 'sending' | 'applied' | 'failed' | 'superseded'
+
 export type SavedIssue = {
   github_id: string
   number: number
   title: string
   state: 'open' | 'closed'
   review_status: 'unreviewed' | 'pending' | 'approved' | 'corrected'
+  delivery_state: DeliveryState | null
+  delivery_error: string | null
+  delivered_at: string | null
 }
 
 export type IssuePage = {

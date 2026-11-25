@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
+import SavedIssueCard from './SavedIssueCard'
 import { listIssues, normalizeRepository, queueIssue, readDescription, syncIssues } from './repository-api'
 import type { IssuePage, SavedIssue } from './repository-api'
+
+type Props = { repo: string; openRepo: (repo: string) => void }
 
 function message(error: unknown) {
   return error instanceof Error ? error.message : 'Request failed.'
 }
 
-export default function RepositoryIssues({ repo, openRepo }: { repo: string; openRepo: (repo: string) => void }) {
+export default function RepositoryIssues({ repo, openRepo }: Props) {
   const [draft, setDraft] = useState(repo)
   const [page, setPage] = useState<IssuePage | null>(null)
   const [detail, setDetail] = useState<{ number: number; body: string } | null>(null)
@@ -37,24 +40,24 @@ export default function RepositoryIssues({ repo, openRepo }: { repo: string; ope
     }
   }
 
+  async function loadFirstPage() {
+    setPage(await listIssues(repo))
+    setDetail(null)
+  }
+
   function selectRepo(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     void run(async () => {
       const selected = normalizeRepository(draft)
-      if (selected !== repo) {
-        openRepo(selected)
-        return
-      }
-      setPage(await listIssues(repo))
-      setDetail(null)
+      if (selected === repo) await loadFirstPage()
+      else openRepo(selected)
     })
   }
 
   function sync() {
     void run(async () => {
       const result = await syncIssues(repo)
-      setPage(await listIssues(repo))
-      setDetail(null)
+      await loadFirstPage()
       setNotice('Synced ' + result.fetched + ' issues.')
     })
   }
@@ -84,12 +87,17 @@ export default function RepositoryIssues({ repo, openRepo }: { repo: string; ope
   function queue(issue: SavedIssue) {
     void run(async () => {
       const result = await queueIssue(issue.github_id)
-      setPage((current) => current && {
-        ...current,
-        issues: current.issues.map((row) => row.github_id === issue.github_id
-          ? { ...row, review_status: result.status } : row),
-      })
-      setNotice(result.status === 'pending' ? 'Queued.' : 'Already reviewed.')
+      if (result.status === 'pending') {
+        setPage((current) => current && {
+          ...current,
+          issues: current.issues.map((row) => row.github_id === issue.github_id
+            ? { ...row, review_status: 'pending' } : row),
+        })
+        setNotice('Queued for review.')
+      } else {
+        await loadFirstPage()
+        setNotice('Already reviewed.')
+      }
     })
   }
 
@@ -110,27 +118,16 @@ export default function RepositoryIssues({ repo, openRepo }: { repo: string; ope
       <section aria-label="Saved issues" aria-busy={busy}>
         <div className="queue-head">
           <h2>{repo}</h2>
-          <button type="button" disabled={busy} onClick={sync}>Sync latest page</button>
+          <div className="add-controls">
+            <button type="button" disabled={busy} onClick={() => void run(loadFirstPage)}>Refresh</button>
+            <button type="button" disabled={busy} onClick={sync}>Sync latest page</button>
+          </div>
         </div>
         {page?.issues.length === 0 && <p className="empty">No saved issues.</p>}
-
         {page?.issues.map((issue) => (
-          <article className="review" key={issue.github_id}>
-            <p className="repo">#{issue.number} · {issue.state} · {issue.review_status}</p>
-            <h3>{issue.title}</h3>
-            <div className="actions">
-              <button type="button" disabled={busy} onClick={() => describe(issue)}>
-                {detail?.number === issue.number ? 'Hide description' : 'Read description'}
-              </button>
-              <button type="button" className="primary" disabled={busy || issue.review_status !== 'unreviewed'}
-                onClick={() => queue(issue)}>Send to review</button>
-            </div>
-            {detail?.number === issue.number && (
-              <p className="message" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-                {detail.body || 'No description.'}
-              </p>
-            )}
-          </article>
+          <SavedIssueCard key={issue.github_id} issue={issue} busy={busy}
+            description={detail?.number === issue.number ? detail.body : null}
+            onDescription={() => describe(issue)} onQueue={() => queue(issue)} />
         ))}
         {page?.next_before != null && (
           <button type="button" disabled={busy} onClick={more}>Load older issues</button>

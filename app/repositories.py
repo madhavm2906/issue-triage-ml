@@ -4,11 +4,12 @@ from fastapi import APIRouter, HTTPException, Path, Query
 from sqlalchemy import and_, case, select
 
 from app.database import engine
-from app.models import Issue, TriageReview
+from app.models import Issue, LabelUpdate, TriageReview
 
 router = APIRouter(tags=["Saved issues"])
 issues = Issue.__table__
 reviews = TriageReview.__table__
+updates = LabelUpdate.__table__
 
 Owner = Annotated[str, Path(pattern=r"^[A-Za-z0-9_-]+$")]
 Repo = Annotated[str, Path(pattern=r"^[A-Za-z0-9_.-]+$")]
@@ -38,9 +39,21 @@ def saved_issues(
         reviews.c.issue_id == issues.c.github_id,
         reviews.c.issue_version == issues.c.content_version,
     )
+    source = issues.outerjoin(reviews, current_review).outerjoin(
+        updates, reviews.c.id == updates.c.review_id
+    )
     statement = (
-        select(issues.c.github_id, issues.c.number, issues.c.title, issues.c.state, review_status)
-        .select_from(issues.outerjoin(reviews, current_review))
+        select(
+            issues.c.github_id,
+            issues.c.number,
+            issues.c.title,
+            issues.c.state,
+            review_status,
+            updates.c.state.label("delivery_state"),
+            updates.c.last_error.label("delivery_error"),
+            updates.c.applied_at.label("delivered_at"),
+        )
+        .select_from(source)
         .where(issues.c.repository == repository)
         .order_by(issues.c.number.desc())
         .limit(limit + 1)
