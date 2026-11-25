@@ -26,11 +26,20 @@ async def list_repository_issues(
     per_page: int,
     *,
     labels: str | None = None,
+    token: str | None = None,
 ) -> dict:
     url = (
         "https://api.github.com/repos/"
         f"{quote(owner, safe='')}/{quote(repo, safe='')}/issues"
     )
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2026-03-10",
+        "User-Agent": "issue-triage-ml",
+    }
+    if token is not None:
+        headers["Authorization"] = f"Bearer {token}"
+
     params: dict[str, str | int] = {
         "state": state,
         "page": page,
@@ -44,12 +53,8 @@ async def list_repository_issues(
     try:
         async with httpx.AsyncClient(
             timeout=15.0,
-            headers={
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2026-03-10",
-                "User-Agent": "issue-triage-ml",
-            },
-            follow_redirects=True,
+            headers=headers,
+            follow_redirects=token is None,
         ) as client:
             response = await client.get(url, params=params)
     except httpx.TimeoutException as exc:
@@ -58,9 +63,7 @@ async def list_repository_issues(
         raise HTTPException(502, "Could not connect to GitHub.") from exc
 
     if response.status_code == 404:
-        raise HTTPException(
-            404, "Repository not found or not publicly accessible."
-        )
+        raise HTTPException(404, "Repository not found or not accessible.")
 
     if response.status_code in (403, 429):
         raise HTTPException(
