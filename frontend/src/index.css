@@ -1,0 +1,89 @@
+:root {
+  font-family: system-ui, sans-serif;
+  color: #16332c;
+  background: #f1f6f3;
+  line-height: 1.5;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; }
+button, input { font: inherit; }
+h1, h2, h3, p { margin: 0; }
+h1, h2, h3 { line-height: 1.2; }
+
+.shell {
+  max-width: 58rem;
+  margin: auto;
+  padding: clamp(1rem, 4vw, 2.5rem);
+}
+
+.banner {
+  background: linear-gradient(120deg, #12382e, #276557);
+  color: #fff;
+  border-radius: 1rem;
+  padding: clamp(1.4rem, 4vw, 2.5rem);
+}
+
+h1 { font-size: clamp(2rem, 5vw, 3rem); letter-spacing: -.04em; }
+h2 { font-size: 1.4rem; }
+h3 { font-size: 1.18rem; overflow-wrap: anywhere; }
+
+.add, .review, .empty {
+  background: #fff;
+  border: 1px solid #d5e5dc;
+  border-radius: .8rem;
+  padding: 1rem 1.15rem;
+}
+
+.add { margin: 1rem 0; }
+.add label { display: block; font-weight: 650; }
+.add small { color: #526960; }
+
+.add-controls, .actions, .queue-head, .scores {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .65rem;
+}
+
+.add-controls { margin: .45rem 0; }
+
+input, button {
+  border-radius: .5rem;
+  border: 1px solid #a8c1b5;
+  padding: .55rem .8rem;
+}
+
+input { flex: 1; min-width: 10rem; background: white; color: inherit; }
+button { background: #fff; color: #174837; cursor: pointer; font-weight: 650; }
+button:hover:enabled { background: #e7f3ed; }
+button:disabled { opacity: .6; cursor: default; }
+button.primary { background: #176149; border-color: #176149; color: white; }
+button.primary:hover:enabled { background: #104e3a; }
+:focus-visible { outline: 3px solid #248576; outline-offset: 3px; }
+
+.queue-head { justify-content: space-between; margin: 1.25rem 0 .65rem; }
+.review + .review { margin-top: .75rem; }
+.repo { font-size: .88rem; color: #526960; margin-bottom: .35rem; }
+.scores { margin: .7rem 0; }
+.scores strong { background: #dff0e7; padding: .15rem .55rem; border-radius: .35rem; }
+.scores span { color: #526960; font-size: .9rem; }
+.actions { margin-top: .85rem; }
+
+details { border-top: 1px solid #e0ebe5; padding-top: .55rem; }
+summary { width: fit-content; cursor: pointer; font-weight: 600; }
+details p { margin-top: .55rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.message {
+  padding: .7rem .85rem;
+  border-radius: .5rem;
+  background: #dcefe5;
+  margin: .75rem 0;
+}
+
+.error { background: #fae6e3; color: #8a302a; }
+.empty { color: #526960; }
+
+@media (max-width: 420px) {
+  .add-controls input, .add-controls button { width: 100%; }
+}
