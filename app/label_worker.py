@@ -17,6 +17,10 @@ LEASE_SECONDS = 60
 class RetryableLabelError(Exception):
     """The sender can try this operation again."""
 
+    def __init__(self, message: str, retry_after: int = 0):
+        super().__init__(message)
+        self.retry_after = retry_after
+
 
 class PermanentLabelError(Exception):
     """The sender needs a maintainer to resolve the failure."""
@@ -114,7 +118,7 @@ def run_once(send: Callable[[dict], None], *, review_id=None):
         send(job)
     except RetryableLabelError as exc:
         if job["attempts"] < MAX_ATTEMPTS:
-            delay = 5 * 2 ** (job["attempts"] - 1)
+            delay = max(5 * 2 ** (job["attempts"] - 1), exc.retry_after)
             return finish(job, "queued", error=str(exc), delay_seconds=delay)
         return finish(job, "failed", error=str(exc))
     except PermanentLabelError as exc:

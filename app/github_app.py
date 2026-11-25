@@ -57,24 +57,35 @@ def sign_app_token(settings: Settings) -> str:
         raise RuntimeError("Could not sign the GitHub App token. Check the PEM file.") from exc
 
 
+def github_client():
+    return httpx.Client(
+        base_url="https://api.github.com",
+        timeout=10,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2026-03-10",
+            "User-Agent": "issue-triage-ml",
+        },
+    )
+
+
 def github_json(client, method, path, token, **kwargs):
     response = client.request(
         method, path, headers={"Authorization": f"Bearer {token}"}, **kwargs
     )
-    if not response.is_success:
-        raise RuntimeError(f"GitHub returned HTTP {response.status_code} for {method} {path}.")
+    response.raise_for_status()
     return response.json()
 
 
-def verified_read_token(client, settings: Settings) -> str:
+def verified_token(client, settings: Settings, permission="read") -> str:
     name = settings.repository.split("/")[1]
     access = github_json(
         client, "POST", f"/app/installations/{settings.installation_id}/access_tokens",
         sign_app_token(settings),
-        json={"repositories": [name], "permissions": {"issues": "read"}},
+        json={"repositories": [name], "permissions": {"issues": permission}},
     )
-    if access.get("permissions", {}).get("issues") != "read":
-        raise RuntimeError("GitHub did not return read access to issues.")
+    if access.get("permissions", {}).get("issues") != permission:
+        raise RuntimeError(f"GitHub did not return {permission} access to issues.")
 
     token = access["token"]
     installed = github_json(client, "GET", "/installation/repositories", token)
@@ -103,16 +114,8 @@ def main():
 
     try:
         settings = load_settings()
-        with httpx.Client(
-            base_url="https://api.github.com",
-            timeout=15,
-            headers={
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2026-03-10",
-                "User-Agent": "issue-triage-ml",
-            },
-        ) as client:
-            token = verified_read_token(client, settings)
+        with github_client() as client:
+            token = verified_token(client, settings)
             print(f"Connected to {settings.repository} with read access.")
             if args.import_issue is not None:
                 from app.storage import save_issues
@@ -120,7 +123,7 @@ def main():
                 issue = read_issue(client, settings, token, args.import_issue)
                 save_issues(settings.repository, [issue])
                 print(f"Read and saved issue #{issue['number']} locally.")
-    except (httpx.RequestError, RuntimeError, KeyError, ValueError) as exc:
+    except (httpx.HTTPError, RuntimeError, KeyError, ValueError) as exc:
         raise SystemExit(str(exc)) from exc
 
 
