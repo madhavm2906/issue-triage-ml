@@ -4,6 +4,9 @@ from sqlalchemy import (
     BigInteger,
     CheckConstraint,
     DateTime,
+    Float,
+    ForeignKey,
+    Identity,
     Index,
     Integer,
     String,
@@ -56,15 +59,48 @@ class Issue(Base):
     url: Mapped[str] = mapped_column(Text)
 
     # Creation and update times supplied by GitHub.
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True)
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True)
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
     # Time this record was fetched into our system.
     fetched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
     )
+
+
+class TriageReview(Base):
+    __tablename__ = "triage_reviews"
+
+    __table_args__ = (
+        UniqueConstraint("issue_id", name="uq_triage_reviews_issue_id"),
+        CheckConstraint(
+            "suggested_label IN ('bug', 'feature-request')",
+            name="ck_triage_reviews_suggested_label",
+        ),
+        CheckConstraint(
+            "final_label IN ('bug', 'feature-request')",
+            name="ck_triage_reviews_final_label",
+        ),
+        CheckConstraint(
+            "bug_score BETWEEN 0 AND 1 AND bug_cutoff BETWEEN 0 AND 1",
+            name="ck_triage_reviews_score_range",
+        ),
+        CheckConstraint(
+            "(final_label IS NULL) = (decided_at IS NULL)",
+            name="ck_triage_reviews_decision",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    issue_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("issues.github_id"))
+    title: Mapped[str] = mapped_column(Text)
+    body: Mapped[str] = mapped_column(Text)
+    suggested_label: Mapped[str] = mapped_column(String(16))
+    bug_score: Mapped[float] = mapped_column(Float)
+    bug_cutoff: Mapped[float] = mapped_column(Float)
+    final_label: Mapped[str | None] = mapped_column(String(16))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

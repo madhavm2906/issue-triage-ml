@@ -1,15 +1,31 @@
+from urllib.parse import quote
+
 import httpx
 from fastapi import HTTPException
-from urllib.parse import quote
 
 
 async def list_repository_issues(
-    owner: str, repo: str, state: str, page: int, per_page: int
+    owner: str,
+    repo: str,
+    state: str,
+    page: int,
+    per_page: int,
+    *,
+    labels: str | None = None,
 ) -> dict:
     url = (
         "https://api.github.com/repos/"
         f"{quote(owner, safe='')}/{quote(repo, safe='')}/issues"
     )
+    params: dict[str, str | int] = {
+        "state": state,
+        "page": page,
+        "per_page": per_page,
+        "sort": "created",
+        "direction": "desc",
+    }
+    if labels is not None:
+        params["labels"] = labels
 
     try:
         async with httpx.AsyncClient(
@@ -21,16 +37,7 @@ async def list_repository_issues(
             },
             follow_redirects=True,
         ) as client:
-            response = await client.get(
-                url,
-                params={
-                    "state": state,
-                    "page": page,
-                    "per_page": per_page,
-                    "sort": "created",
-                    "direction": "desc",
-                },
-            )
+            response = await client.get(url, params=params)
     except httpx.TimeoutException as exc:
         raise HTTPException(504, "GitHub request timed out.") from exc
     except httpx.RequestError as exc:
